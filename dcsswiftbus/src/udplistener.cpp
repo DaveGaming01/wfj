@@ -139,6 +139,9 @@ void CUdpListener::parseDatagram(const char *data, std::size_t len)
         else if (key == "gear") { aircraft.gearDeployRatio = d; }
         else if (key == "flaps") { aircraft.flapsDeployRatio = d; }
         else if (key == "brk") { aircraft.speedBrakeRatio = d; }
+        else if (key == "qnh") {
+            if (d > 600.0 && d < 850.0) { aircraft.qnhMmHg = d; } // sanity: plausible sea-level mmHg
+        }
     }
 
     m_state.updateFromDcs(aircraft);

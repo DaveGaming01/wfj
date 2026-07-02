@@ -16,6 +16,15 @@
 namespace {
 constexpr double M_TO_FT = 3.2808398950131;
 constexpr double MS_TO_KTS = 1.9438444924406;
+constexpr double MMHG_TO_HPA = 1.3332239;
+constexpr double M_PER_HPA = 8.23; // near sea level, standard atmosphere
+
+//! Pressure altitude in meters: true altitude corrected from mission QNH to 1013.25 hPa
+double pressureAltitudeM(const dcsswiftbus::OwnAircraft &a)
+{
+    const double qnhHpa = a.qnhMmHg * MMHG_TO_HPA;
+    return a.altitudeMslM + (1013.25 - qnhHpa) * M_PER_HPA;
+}
 } // namespace
 
 namespace dcsswiftbus {
@@ -74,7 +83,7 @@ DBusHandlerResult CService::dbusMessageHandler(const CDBusMessage &message_)
                 reply.appendArgument(a.pitchDeg);
                 reply.appendArgument(a.rollDeg);
                 reply.appendArgument(a.trueHeadingDeg);
-                reply.appendArgument(a.altitudeMslM * M_TO_FT); // pressure altitude: true altitude for now
+                reply.appendArgument(pressureAltitudeM(a) * M_TO_FT);
                 sendDBusMessage(reply);
             });
         } else if (method == "getOwnAircraftVelocityData") {
@@ -128,19 +137,47 @@ DBusHandlerResult CService::dbusMessageHandler(const CDBusMessage &message_)
                 sendDBusReply(sender, serial, a.heightAglM < 3.0 && a.gearDeployRatio > 0.9);
             });
         } else if (method == "getCom1ActiveKhz") {
-            queueDBusCall([=]() { sendDBusReply(sender, serial, m_state.avionics().com1ActiveKhz); });
+            queueDBusCall([=]() {
+                // While the SRS export feed is live the DCS cockpit owns the radios
+                const SrsRadios srs = m_state.srsRadios();
+                const bool useSrs = m_state.srsFresh() && srs.com1ActiveKhz > 0;
+                sendDBusReply(sender, serial, useSrs ? srs.com1ActiveKhz : m_state.avionics().com1ActiveKhz);
+            });
         } else if (method == "getCom1StandbyKhz") {
             queueDBusCall([=]() { sendDBusReply(sender, serial, m_state.avionics().com1StandbyKhz); });
         } else if (method == "getCom2ActiveKhz") {
-            queueDBusCall([=]() { sendDBusReply(sender, serial, m_state.avionics().com2ActiveKhz); });
+            queueDBusCall([=]() {
+                const SrsRadios srs = m_state.srsRadios();
+                const bool useSrs = m_state.srsFresh() && srs.com2ActiveKhz > 0;
+                sendDBusReply(sender, serial, useSrs ? srs.com2ActiveKhz : m_state.avionics().com2ActiveKhz);
+            });
         } else if (method == "getCom2StandbyKhz") {
             queueDBusCall([=]() { sendDBusReply(sender, serial, m_state.avionics().com2StandbyKhz); });
         } else if (method == "getTransponderCode") {
-            queueDBusCall([=]() { sendDBusReply(sender, serial, m_state.avionics().transponderCode); });
+            queueDBusCall([=]() {
+                const SrsRadios srs = m_state.srsRadios();
+                const bool useSrs = m_state.srsFresh() && srs.transponderCode >= 0;
+                sendDBusReply(sender, serial, useSrs ? srs.transponderCode : m_state.avionics().transponderCode);
+            });
         } else if (method == "getTransponderMode") {
-            queueDBusCall([=]() { sendDBusReply(sender, serial, m_state.avionics().transponderMode); });
+            queueDBusCall([=]() {
+                const SrsRadios srs = m_state.srsRadios();
+                if (m_state.srsFresh() && srs.transponderStatus >= 0) {
+                    // SRS iff.status: 0 off, >=1 normal/ident -> FG convention: 0-2 standby, >2 mode C
+                    sendDBusReply(sender, serial, srs.transponderStatus >= 1 ? 4 : 1);
+                } else {
+                    sendDBusReply(sender, serial, m_state.avionics().transponderMode);
+                }
+            });
         } else if (method == "getTransponderIdent") {
-            queueDBusCall([=]() { sendDBusReply(sender, serial, m_state.avionics().transponderIdent); });
+            queueDBusCall([=]() {
+                const SrsRadios srs = m_state.srsRadios();
+                if (m_state.srsFresh() && srs.transponderStatus >= 0) {
+                    sendDBusReply(sender, serial, srs.transponderStatus == 2);
+                } else {
+                    sendDBusReply(sender, serial, m_state.avionics().transponderIdent);
+                }
+            });
         } else if (method == "getBeaconLightsOn") {
             queueDBusCall([=]() { sendDBusReply(sender, serial, true); });
         } else if (method == "getLandingLightsOn") {
@@ -152,7 +189,7 @@ DBusHandlerResult CService::dbusMessageHandler(const CDBusMessage &message_)
         } else if (method == "getTaxiLightsOn") {
             queueDBusCall([=]() { sendDBusReply(sender, serial, false); });
         } else if (method == "getPressAlt") {
-            queueDBusCall([=]() { sendDBusReply(sender, serial, m_state.aircraft().altitudeMslM * M_TO_FT); });
+            queueDBusCall([=]() { sendDBusReply(sender, serial, pressureAltitudeM(m_state.aircraft()) * M_TO_FT); });
         } else if (method == "getGroundElevation") {
             queueDBusCall([=]() {
                 const OwnAircraft a = m_state.aircraft();

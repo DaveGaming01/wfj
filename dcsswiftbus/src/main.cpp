@@ -12,6 +12,7 @@
 #include "dbus/dbusdispatcher.h"
 #include "dbus/dbusserver.h"
 #include "service.h"
+#include "srslistener.h"
 #include "state.h"
 #include "traffic.h"
 #include "udplistener.h"
@@ -38,6 +39,7 @@ int main(int argc, char **argv)
     std::string dbusHost = "127.0.0.1";
     std::string dbusPort = "45003";
     std::uint16_t udpPort = 47788;
+    int srsPort = 9084; // DCS-SRS RADIO_SEND_TO_PORT; 0 disables cockpit radio sync
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -48,11 +50,14 @@ int main(int argc, char **argv)
             if (const char *v = nextArg()) { dbusPort = v; }
         } else if (arg == "--udp-port") {
             if (const char *v = nextArg()) { udpPort = static_cast<std::uint16_t>(std::atoi(v)); }
+        } else if (arg == "--srs-port") {
+            if (const char *v = nextArg()) { srsPort = std::atoi(v); }
         } else {
-            std::cout << "usage: dcsswiftbus [--dbus-host 127.0.0.1] [--dbus-port 45003] [--udp-port 47788]\n"
+            std::cout << "usage: dcsswiftbus [--dbus-host 127.0.0.1] [--dbus-port 45003] [--udp-port 47788] [--srs-port 9084]\n"
                       << "\n"
                       << "In swift, set the FlightGear plugin's DBus server address to\n"
-                      << "tcp:host=<dbus-host>,port=<dbus-port> and enable the FlightGear simulator plugin.\n";
+                      << "tcp:host=<dbus-host>,port=<dbus-port> and enable the FlightGear simulator plugin.\n"
+                      << "--srs-port listens for DCS-SRS export broadcasts (cockpit radio sync); 0 disables.\n";
             return (arg == "--help" || arg == "-h") ? 0 : 1;
         }
     }
@@ -65,6 +70,17 @@ int main(int argc, char **argv)
     CUdpListener udpListener(state, udpPort);
     if (!udpListener.start()) { return 1; }
     std::cout << "dcsswiftbus: listening for DCS Export.lua data on udp://127.0.0.1:" << udpPort << std::endl;
+
+    std::unique_ptr<CSrsListener> srsListener;
+    if (srsPort > 0) {
+        srsListener = std::make_unique<CSrsListener>(state, static_cast<std::uint16_t>(srsPort));
+        if (srsListener->start()) {
+            std::cout << "dcsswiftbus: listening for DCS-SRS radio broadcasts on udp://0.0.0.0:" << srsPort << std::endl;
+        } else {
+            std::cout << "dcsswiftbus: cockpit radio sync disabled, swift GUI owns the radios" << std::endl;
+            srsListener.reset();
+        }
+    }
 
     CDBusDispatcher dispatcher;
     CService service(state);
@@ -108,7 +124,17 @@ int main(int argc, char **argv)
                       << " | packets=" << udpListener.packetCount()
                       << " | " << a.aircraftName
                       << " lat=" << a.latitudeDeg << " lon=" << a.longitudeDeg
-                      << " altMSL=" << a.altitudeMslM << "m" << std::endl;
+                      << " altMSL=" << a.altitudeMslM << "m";
+            if (srsListener) {
+                if (state.srsFresh()) {
+                    const SrsRadios srs = state.srsRadios();
+                    std::cout << " | SRS radios OK com1=" << srs.com1ActiveKhz << "kHz com2=" << srs.com2ActiveKhz
+                              << "kHz squawk=" << srs.transponderCode;
+                } else {
+                    std::cout << " | no SRS radio data (swift GUI owns radios)";
+                }
+            }
+            std::cout << std::endl;
             lastStatus = now;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(5));

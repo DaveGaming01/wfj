@@ -10,7 +10,9 @@ pkg_check_modules(LIBEVENT REQUIRED libevent)
 
 add_executable(dcsswiftbus
     src/main.cpp
+    src/minijson.cpp
     src/service.cpp
+    src/srslistener.cpp
     src/traffic.cpp
     src/udplistener.cpp
     src/dbus/dbusconnection.cpp

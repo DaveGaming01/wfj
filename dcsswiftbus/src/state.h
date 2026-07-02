@@ -30,7 +30,16 @@ struct OwnAircraft {
     double gearDeployRatio = 0.0;
     double flapsDeployRatio = 0.0;
     double speedBrakeRatio = 0.0;
+    double qnhMmHg = 760.0; // mission sea-level pressure from LoGetBasicAtmospherePressure()
     std::string aircraftName = "DCS";
+};
+
+//! Cockpit radio state as broadcast by the DCS-SRS export script (UDP 9084 JSON)
+struct SrsRadios {
+    int com1ActiveKhz = 0; // 0 = no data
+    int com2ActiveKhz = 0;
+    int transponderCode = -1; // -1 = no data
+    int transponderStatus = -1; // SRS iff.status: 0 off, 1 normal, 2 ident; -1 = no data
 };
 
 //! Radio/transponder state owned by swift (set via DBus, echoed back on reads)
@@ -79,15 +88,42 @@ public:
     bool isStale() const
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        if (m_lastUpdate.time_since_epoch().count() == 0) { return true; }
-        return std::chrono::steady_clock::now() - m_lastUpdate > std::chrono::seconds(3);
+        return isStaleLocked(m_lastUpdate);
+    }
+
+    void updateFromSrs(const SrsRadios &radios)
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_srsRadios = radios;
+        m_srsLastUpdate = std::chrono::steady_clock::now();
+    }
+
+    SrsRadios srsRadios() const
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_srsRadios;
+    }
+
+    //! True while the SRS export feed is live: the DCS cockpit owns the radios
+    bool srsFresh() const
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return !isStaleLocked(m_srsLastUpdate);
     }
 
 private:
+    static bool isStaleLocked(const std::chrono::steady_clock::time_point &t)
+    {
+        if (t.time_since_epoch().count() == 0) { return true; }
+        return std::chrono::steady_clock::now() - t > std::chrono::seconds(3);
+    }
+
     mutable std::mutex m_mutex;
     OwnAircraft m_aircraft;
     Avionics m_avionics;
+    SrsRadios m_srsRadios;
     std::chrono::steady_clock::time_point m_lastUpdate;
+    std::chrono::steady_clock::time_point m_srsLastUpdate;
 };
 
 } // namespace dcsswiftbus

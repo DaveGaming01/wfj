@@ -22,9 +22,33 @@ to what swift already interoperates with. API version reported: **3** (swift rej
 |---|---|
 | ✅ Own aircraft position/attitude on the network | streamed from DCS at 10 Hz |
 | ✅ Voice + text with ATC | via swift's built-in Audio for VATSIM (PTT bound in swift) |
-| ✅ COM1/COM2 + transponder | managed in the swift GUI (daemon stores what swift sets) |
+| ✅ Cockpit radio + squawk sync (~60 modules) | piggybacks on the DCS-SRS export broadcasts if SRS is installed; falls back to swift-GUI-managed radios otherwise |
+| ✅ Pressure altitude | true altitude corrected with the mission QNH (`LoGetBasicAtmosphericPressure`), so your Mode C reads correctly on non-standard-pressure days |
 | ✅ Model matching for others | file your type (e.g. `FA18`) — others see you with their military CSLs |
 | ❌ Seeing VATSIM traffic inside DCS | traffic calls are accepted but nothing is rendered — DCS cannot spawn arbitrary aircraft from outside. Use swift's mapping/radar view for awareness. |
+
+### Cockpit radio sync (via DCS-SRS)
+
+[DCS-SRS](https://github.com/ciribob/DCS-SimpleRadioStandalone)' export script broadcasts
+the full cockpit radio and IFF state as JSON to UDP `127.0.0.1:9084` on every export tick,
+using per-aircraft exporters for ~60 modules (F/A-18C, F-16C, F-4E, F-14, A-10C, Mirage,
+helicopters, warbirds, ...). The daemon listens on that port, so:
+
+- **SRS installed** (only its scripts need to be installed — the SRS *client app* must NOT
+  be running, it would grab port 9084): what you tune on COMM1/COMM2 in the cockpit is what
+  swift transmits/receives on, and your IFF panel's Mode 3 code becomes your squawk.
+  swift's own radio buttons are overridden while cockpit data is live.
+- **No SRS**: COM1/COM2/squawk are controlled from the swift GUI, as before.
+
+If you need to run the actual SRS client at the same time, give SRS a different port and
+point `--srs-port` at it, or pass `--srs-port 0` to disable cockpit sync.
+
+### Heading looks ~10-15° off on radar?
+
+That's not a bug: VATSIM's protocol carries **true** heading, and controllers' scopes are
+true-north referenced, while your HUD/HSI shows **magnetic** heading. The difference is the
+local magnetic variation (e.g. ~13°E at SCCI on the South Atlantic map). Every other pilot
+client reports true heading the same way.
 
 You are procedurally blind to other traffic in-sim. Fly accordingly (and per whatever
 arrangement you have with VATSIM: stay out of busy airspace, comply with ATC).

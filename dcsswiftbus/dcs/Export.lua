@@ -68,17 +68,23 @@ do
                     if mech.speedbrakes and mech.speedbrakes.value then brk = mech.speedbrakes.value end
                 end
 
+                -- mission sea-level pressure in mmHg (Mission Editor QNH), for pressure altitude
+                local qnh = 760.0
+                if LoGetBasicAtmospherePressure then
+                    qnh = LoGetBasicAtmospherePressure() or 760.0
+                end
+
                 local msg = string.format(
                     "name=%s;lat=%.7f;lon=%.7f;alt=%.2f;agl=%.2f;gs=%.2f;" ..
                     "pitch=%.3f;roll=%.3f;hdg=%.3f;" ..
                     "ve=%.3f;vu=%.3f;vn=%.3f;" ..
                     "pr=%.5f;rr=%.5f;yr=%.5f;" ..
-                    "gear=%.2f;flaps=%.2f;brk=%.2f",
+                    "gear=%.2f;flaps=%.2f;brk=%.2f;qnh=%.2f",
                     self.Name or "DCS", lat, lon, alt, agl, gs,
                     pitch, roll, hdg,
                     vel.z, vel.y, vel.x,
                     omega.z, omega.x, omega.y,
-                    gear, flaps, brk)
+                    gear, flaps, brk, qnh)
                 udp:sendto(msg, dcsswiftbus.HOST, dcsswiftbus.PORT)
             end
         end

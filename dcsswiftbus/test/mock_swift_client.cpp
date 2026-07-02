@@ -140,10 +140,16 @@ int main(int argc, char **argv)
     }
     check(situationOk, "getOwnAircraftSituationData signature (8 doubles)");
     std::cout << "  situation: lat=" << lat << " lon=" << lon << " alt=" << altFt << "ft gs=" << gsKts
-              << "kts pitch=" << pitch << " roll=" << roll << " hdg=" << hdg << std::endl;
-    // mock_dcs.py orbits Batumi at 2000 m
+              << "kts pitch=" << pitch << " roll=" << roll << " hdg=" << hdg << " pressAlt=" << pressAlt << "ft"
+              << std::endl;
+    // mock_dcs.py orbits Batumi at 2000 m with QNH 745 mmHg (993.2 hPa)
     check(std::fabs(lat - 41.61) < 0.5 && std::fabs(lon - 41.60) < 0.5, "position matches DCS feed (Batumi)");
     check(std::fabs(altFt - 2000.0 * 3.2808398950131) < 50.0, "altitude matches DCS feed (2000 m -> ft)");
+    // pressure altitude = 2000 m + (1013.25 - 745*1.3332239) * 8.23 m = ~2165 m = ~7103 ft
+    const double expectedPressAltFt = (2000.0 + (1013.25 - 745.0 * 1.3332239) * 8.23) * 3.2808398950131;
+    check(std::fabs(pressAlt - expectedPressAltFt) < 20.0,
+          "pressure altitude corrected for QNH (expected ~" + std::to_string(static_cast<int>(expectedPressAltFt)) +
+              " ft, got " + std::to_string(static_cast<int>(pressAlt)) + " ft)");
 
     reply = call(conn, SERVICE_PATH, SERVICE_IFACE, "getOwnAircraftVelocityData");
     double ve = 0, vu = 0, vn = 0, pr = 0, rr = 0, yr = 0;
@@ -165,18 +171,33 @@ int main(int argc, char **argv)
     }
     check(paused == FALSE, "isPaused == false while DCS feed is live");
 
-    // --- radios: swift writes, then reads back (swift owns the radio stack for DCS) ---
+    // --- radios: with the SRS feed live, the DCS cockpit owns COM1/COM2 and squawk ---
+    int com1 = 0, com2 = 0;
+    const bool com1Ok = getInt(conn, "getCom1ActiveKhz", com1);
+    check(com1Ok && com1 == 305000, "getCom1ActiveKhz == 305000 from SRS cockpit feed (got " + std::to_string(com1) + ")");
+    const bool com2Ok = getInt(conn, "getCom2ActiveKhz", com2);
+    check(com2Ok && com2 == 127500, "getCom2ActiveKhz == 127500 from SRS cockpit feed (got " + std::to_string(com2) + ")");
+
+    // swift trying to set COM1 must not shadow the cockpit while SRS data is live
     dbus_int32_t freq = 122800;
     reply = call(conn, SERVICE_PATH, SERVICE_IFACE, "setCom1ActiveKhz", DBUS_TYPE_INT32, &freq, DBUS_TYPE_INVALID);
     if (reply) { dbus_message_unref(reply); }
-    int com1 = 0;
-    check(getInt(conn, "getCom1ActiveKhz", com1) && com1 == 122800, "setCom1ActiveKhz/getCom1ActiveKhz round-trip");
+    const bool com1AgainOk = getInt(conn, "getCom1ActiveKhz", com1);
+    check(com1AgainOk && com1 == 305000, "cockpit radio overrides swift's setCom1ActiveKhz while SRS feed is live");
 
-    dbus_int32_t squawk = 7421;
-    reply = call(conn, SERVICE_PATH, SERVICE_IFACE, "setTransponderCode", DBUS_TYPE_INT32, &squawk, DBUS_TYPE_INVALID);
+    int code = 0, mode = 0;
+    const bool codeOk = getInt(conn, "getTransponderCode", code);
+    check(codeOk && code == 4520, "getTransponderCode == 4520 from SRS IFF (got " + std::to_string(code) + ")");
+    const bool modeOk = getInt(conn, "getTransponderMode", mode);
+    check(modeOk && mode == 4, "getTransponderMode == 4 (mode C) from SRS IFF status");
+
+    // standby frequency is still swift-owned (SRS does not report it)
+    dbus_int32_t standby = 118250;
+    reply = call(conn, SERVICE_PATH, SERVICE_IFACE, "setCom1StandbyKhz", DBUS_TYPE_INT32, &standby, DBUS_TYPE_INVALID);
     if (reply) { dbus_message_unref(reply); }
-    int code = 0;
-    check(getInt(conn, "getTransponderCode", code) && code == 7421, "setTransponderCode/getTransponderCode round-trip");
+    int com1Standby = 0;
+    check(getInt(conn, "getCom1StandbyKhz", com1Standby) && com1Standby == 118250,
+          "setCom1StandbyKhz/getCom1StandbyKhz round-trip (swift-owned)");
 
     // --- traffic: add a remote plane like swift does when a VATSIM aircraft comes in range ---
     const char *cs = "DAL123";
