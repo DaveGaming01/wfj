@@ -120,16 +120,19 @@ int main(int argc, char **argv)
         }
         if (now - lastStatus >= std::chrono::seconds(10)) {
             const OwnAircraft a = state.aircraft();
+            constexpr double M_TO_FT = 3.2808398950131;
             std::cout << "dcsswiftbus: " << (state.isStale() ? "NO DCS DATA" : "DCS feed OK")
                       << " | packets=" << udpListener.packetCount()
                       << " | " << a.aircraftName
                       << " lat=" << a.latitudeDeg << " lon=" << a.longitudeDeg
-                      << " altMSL=" << a.altitudeMslM << "m";
+                      << " altMSL=" << static_cast<int>(a.altitudeMslM * M_TO_FT) << "ft"
+                      << " QNH=" << a.qnhMmHg << "mmHg";
             if (srsListener) {
                 if (state.srsFresh()) {
                     const SrsRadios srs = state.srsRadios();
-                    std::cout << " | SRS radios OK com1=" << srs.com1ActiveKhz << "kHz com2=" << srs.com2ActiveKhz
-                              << "kHz squawk=" << srs.transponderCode;
+                    std::cout << " | SRS radios OK com1=" << srs.com1ActiveKhz << "kHz com2=" << srs.com2ActiveKhz << "kHz";
+                    if (srs.transponderCode >= 0) { std::cout << " squawk=" << srs.transponderCode; }
+                    else { std::cout << " squawk=swift-GUI"; }
                 } else {
                     std::cout << " | no SRS radio data (swift GUI owns radios)";
                 }

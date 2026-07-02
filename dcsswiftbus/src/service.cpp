@@ -162,8 +162,9 @@ DBusHandlerResult CService::dbusMessageHandler(const CDBusMessage &message_)
         } else if (method == "getTransponderMode") {
             queueDBusCall([=]() {
                 const SrsRadios srs = m_state.srsRadios();
-                if (m_state.srsFresh() && srs.transponderStatus >= 0) {
-                    // SRS iff.status: 0 off, >=1 normal/ident -> FG convention: 0-2 standby, >2 mode C
+                // cockpit owns the transponder only while it reports a plausible squawk
+                if (m_state.srsFresh() && srs.transponderCode >= 0 && srs.transponderStatus >= 0) {
+                    // SRS iff.status: 0/-1 off, >=1 normal/ident -> FG convention: 0-2 standby, >2 mode C
                     sendDBusReply(sender, serial, srs.transponderStatus >= 1 ? 4 : 1);
                 } else {
                     sendDBusReply(sender, serial, m_state.avionics().transponderMode);
@@ -172,7 +173,7 @@ DBusHandlerResult CService::dbusMessageHandler(const CDBusMessage &message_)
         } else if (method == "getTransponderIdent") {
             queueDBusCall([=]() {
                 const SrsRadios srs = m_state.srsRadios();
-                if (m_state.srsFresh() && srs.transponderStatus >= 0) {
+                if (m_state.srsFresh() && srs.transponderCode >= 0 && srs.transponderStatus >= 0) {
                     sendDBusReply(sender, serial, srs.transponderStatus == 2);
                 } else {
                     sendDBusReply(sender, serial, m_state.avionics().transponderIdent);

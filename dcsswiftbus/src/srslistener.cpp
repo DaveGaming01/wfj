@@ -122,8 +122,12 @@ void CSrsListener::parseDatagram(const std::string &payload)
             result.transponderStatus = static_cast<int>(status->number);
         }
         if (const json::ValuePtr mode3 = iff->get("mode3"); mode3 && mode3->isNumber()) {
+            // Only a plausible squawk counts: non-zero, four octal digits. Modules whose
+            // IFF is unpowered/unsupported report 0 or -1 -> swift GUI keeps the squawk.
             const int code = static_cast<int>(mode3->number);
-            if (code >= 0 && code <= 7777) { result.transponderCode = code; }
+            const bool octal = code >= 1 && code <= 7777 && (code % 10) <= 7 && (code / 10 % 10) <= 7 &&
+                               (code / 100 % 10) <= 7 && (code / 1000 % 10) <= 7;
+            if (octal) { result.transponderCode = code; }
         }
     }
 
