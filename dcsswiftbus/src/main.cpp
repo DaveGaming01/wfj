@@ -3,11 +3,13 @@
  *
  * swift connects to this daemon believing it is FlightGear's FGSwiftBus plugin
  * (P2P DBus server, default tcp:host=127.0.0.1,port=45003). Own-aircraft data
- * is fed from DCS via Export.lua over UDP (default port 47788).
+ * is fed from DCS via Export.lua over UDP; cockpit radios come from the
+ * DCS-SRS export broadcasts when enabled.
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
+#include "config.h"
 #include "dbus/dbusconnection.h"
 #include "dbus/dbusdispatcher.h"
 #include "dbus/dbusserver.h"
@@ -20,8 +22,6 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
-#include <cstdlib>
-#include <cstring>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -30,54 +30,60 @@
 namespace {
 std::atomic<bool> g_quit { false };
 void signalHandler(int) { g_quit = true; }
+constexpr double M_TO_FT = 3.2808398950131;
+
+//! Keep the console window readable when launched by double-click on Windows
+int fail()
+{
+#ifdef _WIN32
+    std::cout << "\nPress Enter to close..." << std::endl;
+    std::cin.get();
+#endif
+    return 1;
+}
 } // namespace
 
 int main(int argc, char **argv)
 {
     using namespace dcsswiftbus;
 
-    std::string dbusHost = "127.0.0.1";
-    std::string dbusPort = "45003";
-    std::uint16_t udpPort = 47788;
-    int srsPort = 9084; // DCS-SRS RADIO_SEND_TO_PORT; 0 disables cockpit radio sync
-
-    for (int i = 1; i < argc; ++i) {
-        const std::string arg = argv[i];
-        auto nextArg = [&]() -> const char * { return (i + 1 < argc) ? argv[++i] : nullptr; };
-        if (arg == "--dbus-host") {
-            if (const char *v = nextArg()) { dbusHost = v; }
-        } else if (arg == "--dbus-port") {
-            if (const char *v = nextArg()) { dbusPort = v; }
-        } else if (arg == "--udp-port") {
-            if (const char *v = nextArg()) { udpPort = static_cast<std::uint16_t>(std::atoi(v)); }
-        } else if (arg == "--srs-port") {
-            if (const char *v = nextArg()) { srsPort = std::atoi(v); }
-        } else {
-            std::cout << "usage: dcsswiftbus [--dbus-host 127.0.0.1] [--dbus-port 45003] [--udp-port 47788] [--srs-port 9084]\n"
-                      << "\n"
-                      << "In swift, set the FlightGear plugin's DBus server address to\n"
-                      << "tcp:host=<dbus-host>,port=<dbus-port> and enable the FlightGear simulator plugin.\n"
-                      << "--srs-port listens for DCS-SRS export broadcasts (cockpit radio sync); 0 disables.\n";
-            return (arg == "--help" || arg == "-h") ? 0 : 1;
-        }
-    }
+    Config config;
+    config.loadFile("dcsswiftbus.cfg"); // optional, next to the exe / in the working dir
+    if (!config.applyArgs(argc, argv)) { return fail(); }
 
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
 
+    const std::string listenAddress = "tcp:host=" + config.dbusHost + ",port=" + config.dbusPort;
+
+    std::cout << "======================================================================\n"
+              << " dcsswiftbus - fly DCS World on VATSIM through the swift pilot client\n"
+              << "======================================================================\n"
+              << " swift connection:   " << listenAddress << "\n"
+              << "                     (swift: enable the FlightGear plugin, DBus P2P,\n"
+              << "                      host " << config.dbusHost << ", port " << config.dbusPort << ")\n"
+              << " DCS position feed:  udp " << config.udpPort << " (Export.lua)\n";
+    if (config.cockpitRadios) {
+        std::cout << " Radios & squawk:    DCS cockpit via DCS-SRS broadcasts (udp " << config.srsPort << ")\n"
+                  << "                     swift GUI takes over when no cockpit data\n";
+    } else {
+        std::cout << " Radios & squawk:    swift GUI (cockpit sync disabled)\n";
+    }
+    std::cout << " Settings file:      " << (config.loadedFrom.empty() ? "none (using defaults)" : config.loadedFrom)
+              << "\n"
+              << "======================================================================" << std::endl;
+
     CState state;
 
-    CUdpListener udpListener(state, udpPort);
-    if (!udpListener.start()) { return 1; }
-    std::cout << "dcsswiftbus: listening for DCS Export.lua data on udp://127.0.0.1:" << udpPort << std::endl;
+    CUdpListener udpListener(state, static_cast<std::uint16_t>(config.udpPort));
+    if (!udpListener.start()) { return fail(); }
 
     std::unique_ptr<CSrsListener> srsListener;
-    if (srsPort > 0) {
-        srsListener = std::make_unique<CSrsListener>(state, static_cast<std::uint16_t>(srsPort));
-        if (srsListener->start()) {
-            std::cout << "dcsswiftbus: listening for DCS-SRS radio broadcasts on udp://0.0.0.0:" << srsPort << std::endl;
-        } else {
-            std::cout << "dcsswiftbus: cockpit radio sync disabled, swift GUI owns the radios" << std::endl;
+    if (config.cockpitRadios && config.srsPort > 0) {
+        srsListener = std::make_unique<CSrsListener>(state, static_cast<std::uint16_t>(config.srsPort));
+        if (!srsListener->start()) {
+            std::cout << "! Could not listen on the SRS port - is the SRS client running?\n"
+                      << "! Cockpit radio sync is off for this session; use the swift GUI to tune." << std::endl;
             srsListener.reset();
         }
     }
@@ -88,14 +94,14 @@ int main(int argc, char **argv)
     std::shared_ptr<CDBusConnection> connection;
 
     CDBusServer server;
-    const std::string listenAddress = "tcp:host=" + dbusHost + ",port=" + dbusPort;
     if (!server.listen(listenAddress)) {
-        std::cerr << "dcsswiftbus: failed to listen on " << listenAddress << std::endl;
-        return 1;
+        std::cerr << "dcsswiftbus: failed to listen on " << listenAddress
+                  << " (port in use? another dcsswiftbus or FlightGear running?)" << std::endl;
+        return fail();
     }
     server.setDispatcher(&dispatcher);
     server.setNewConnectionFunc([&](const std::shared_ptr<CDBusConnection> &conn) {
-        std::cout << "dcsswiftbus: swift connected" << std::endl;
+        std::cout << "* swift connected" << std::endl;
         connection = conn;
         connection->setDispatcher(&dispatcher);
         service.setDBusConnection(connection);
@@ -103,11 +109,13 @@ int main(int argc, char **argv)
         traffic.setDBusConnection(connection);
         traffic.registerDBusObjectPath(CTraffic::InterfaceName(), CTraffic::ObjectPath());
     });
-    std::cout << "dcsswiftbus: FGSwiftBus-compatible DBus server on " << listenAddress << std::endl;
+    std::cout << "Waiting for DCS (fly a mission) and swift (connect the FlightGear plugin)..." << std::endl;
 
     // Main loop, mirrors FGSwiftBus' fastLoop(): dispatch DBus, run queued calls, emit simFrame
     auto lastSimFrame = std::chrono::steady_clock::now();
     auto lastStatus = std::chrono::steady_clock::now();
+    bool hadDcs = false;
+    bool hadSrs = false;
     while (!g_quit) {
         dispatcher.runOnce();
         service.process();
@@ -118,9 +126,27 @@ int main(int argc, char **argv)
             traffic.emitSimFrame();
             lastSimFrame = now;
         }
+
+        // announce feed transitions immediately
+        const bool hasDcs = !state.isStale();
+        if (hasDcs != hadDcs) {
+            std::cout << (hasDcs ? "* DCS position feed started (" + state.aircraft().aircraftName + ")"
+                                 : "* DCS position feed lost (mission paused/ended?)")
+                      << std::endl;
+            hadDcs = hasDcs;
+        }
+        if (srsListener) {
+            const bool hasSrs = state.srsFresh();
+            if (hasSrs != hadSrs) {
+                std::cout << (hasSrs ? "* cockpit radio feed started (DCS-SRS)"
+                                     : "* cockpit radio feed lost - swift GUI owns the radios")
+                          << std::endl;
+                hadSrs = hasSrs;
+            }
+        }
+
         if (now - lastStatus >= std::chrono::seconds(10)) {
             const OwnAircraft a = state.aircraft();
-            constexpr double M_TO_FT = 3.2808398950131;
             std::cout << "dcsswiftbus: " << (state.isStale() ? "NO DCS DATA" : "DCS feed OK")
                       << " | packets=" << udpListener.packetCount()
                       << " | " << a.aircraftName

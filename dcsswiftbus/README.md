@@ -53,6 +53,39 @@ client reports true heading the same way.
 You are procedurally blind to other traffic in-sim. Fly accordingly (and per whatever
 arrangement you have with VATSIM: stay out of busy airspace, comply with ATC).
 
+## Windows: build once, then it's double-click
+
+Build under [MSYS2](https://www.msys2.org/) (MINGW64 shell):
+
+```sh
+pacman -S --needed git mingw-w64-x86_64-{gcc,cmake,ninja,pkgconf,dbus,libevent}
+./tools/package.sh
+```
+
+`package.sh` produces a **portable folder** `dist/dcsswiftbus/` (exe + all DLLs +
+config + installer) that runs without MSYS2 — copy it wherever you like. Then:
+
+1. In that folder, double-click **`install-export-lua.bat`** — it merges the
+   dcsswiftbus feed into every `Saved Games\DCS*\Scripts\Export.lua` (keeps
+   SRS/TacView lines, makes a backup, safe to re-run after updates).
+   If you pasted the export block by hand before: remove your pasted copy first —
+   the installer only manages its own marked block.
+2. Double-click **`dcsswiftbus.exe`** each session before/after starting DCS.
+
+## Settings (`dcsswiftbus.cfg`)
+
+All options live in `dcsswiftbus.cfg` next to the exe (command line overrides it,
+see `--help`). The one you're most likely to touch:
+
+```ini
+# cockpit = radios/squawk follow what you tune in the DCS cockpit (needs DCS-SRS)
+# swift   = always tune radios and squawk in the swift GUI
+radios = cockpit
+```
+
+With `radios = cockpit` the swift GUI still takes over automatically whenever no
+cockpit data is available (module without SRS support, IFF off, SRS not installed).
+
 ## Build (Linux)
 
 ```sh
@@ -61,9 +94,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
-On Windows, build under [MSYS2](https://www.msys2.org/)
-(`pacman -S mingw-w64-x86_64-{gcc,cmake,pkgconf,dbus,libevent}`) or with vcpkg
-(`dbus` + `libevent` ports). The code is plain C++17 + libdbus + libevent, no Qt.
+The code is plain C++17 + libdbus + libevent, no Qt.
 
 ## Run the proof of concept (no DCS or swift needed)
 
