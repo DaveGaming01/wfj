@@ -53,24 +53,30 @@ client reports true heading the same way.
 You are procedurally blind to other traffic in-sim. Fly accordingly (and per whatever
 arrangement you have with VATSIM: stay out of busy airspace, comply with ATC).
 
-## Windows: build once, then it's double-click
+## Install (Windows, no tools needed)
 
-Build under [MSYS2](https://www.msys2.org/) (MINGW64 shell):
+1. **Download**: repo → **Actions** tab → newest green *"build dcsswiftbus"* run →
+   download the **dcsswiftbus-win64** artifact (a zip). On tagged releases the same
+   zip is attached to the GitHub **Release**.
+2. **Extract** the `dcsswiftbus` folder anywhere (Desktop is fine).
+3. Double-click **`1. SETUP - run me once.bat`** and follow what it prints
+   (it installs the DCS export script for you — SRS/TacView setups survive,
+   a backup is made, and re-running after an update is safe).
+4. Every session: double-click **`2. START dcsswiftbus.bat`**, fly DCS, connect swift.
+
+`READ ME FIRST.txt` in the folder covers the rest (radios, squawk, tips).
+
+If you previously pasted the export block into `Export.lua` by hand, remove your
+pasted copy once — the installer only manages its own marked block.
+
+### Building the portable folder yourself
+
+Under [MSYS2](https://www.msys2.org/) (MINGW64 shell):
 
 ```sh
 pacman -S --needed git mingw-w64-x86_64-{gcc,cmake,ninja,pkgconf,dbus,libevent}
-./tools/package.sh
+./tools/package.sh    # produces dist/dcsswiftbus/ - same folder CI ships
 ```
-
-`package.sh` produces a **portable folder** `dist/dcsswiftbus/` (exe + all DLLs +
-config + installer) that runs without MSYS2 — copy it wherever you like. Then:
-
-1. In that folder, double-click **`install-export-lua.bat`** — it merges the
-   dcsswiftbus feed into every `Saved Games\DCS*\Scripts\Export.lua` (keeps
-   SRS/TacView lines, makes a backup, safe to re-run after updates).
-   If you pasted the export block by hand before: remove your pasted copy first —
-   the installer only manages its own marked block.
-2. Double-click **`dcsswiftbus.exe`** each session before/after starting DCS.
 
 ## Settings (`dcsswiftbus.cfg`)
 
